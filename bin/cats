@@ -36,6 +36,7 @@ redis.sadd 'rehomed_cats', cats
                              .select { |cat| cat['field_animal_rehomed'] == 'Rehomed' }
                              .map { |cat| cat['nid'] }
 
+redis.sinter('available_cats', 'reserved_cats').each { |cat| redis.smove('available_cats', 'reserved_cats', cat) }
 redis.sinter('reserved_cats', 'rehomed_cats').each { |cat| redis.smove('reserved_cats', 'rehomed_cats', cat) }
 
 available_cats = cats
