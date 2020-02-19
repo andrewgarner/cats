@@ -25,33 +25,41 @@ cats = api
          .fetch('animals')
          .values
          .select { |animal| animal['field_animal_centre'] == 'old windsor' }
-         .reject { |old_windsor_cat| redis.sismember('cats', old_windsor_cat.fetch('nid')) }
-
-first_run = redis.smembers('cats').empty?
 
 logger.info 'Found %s cat(s)' % cats.size
 
-if cats.any?
-  redis.sadd('cats', cats.map { |c| c.fetch('nid') })
+redis.sadd 'reserved_cats', cats
+                              .select { |cat| cat['field_animal_reserved'] == 'Reserved' }
+                              .map { |cat| cat['nid'] }
 
-  if !first_run
-    cats.each do |cat|
-      logger.info 'Sending alert for %s' % cat['title']
+redis.sadd 'rehomed_cats', cats
+                             .select { |cat| cat['field_animal_rehomed'] == 'Rehomed' }
+                             .map { |cat| cat['nid'] }
 
+redis.sinter('reserved_cats', 'rehomed_cats').each { |cat| redis.smove('reserved_cats', 'rehomed_cats', cat) }
 
-      message_body = <<~MESSAGE
-      New cat alert!
+available_cats = cats
+                   .reject { |cat| redis.sunion('reserved_cats', 'rehomed_cats').include?(String(cat['nid'])) }
 
-      #{cat['title']} – #{URI.join('https://www.battersea.org.uk', cat['path'])}
-      MESSAGE
+new_cats = available_cats
+             .reject { |cat| redis.smembers('available_cats').include?(String(cat['nid'])) }
 
-      message = twillio.messages.create(
-        from: TWILLIO_FROM,
-        to: TWILLIO_TO,
-        body: message_body
-      )
+redis.sadd 'available_cats', available_cats.map { |cat| cat['nid'] }
 
-      logger.info '-> Message %s sent' % message.sid
-    end
-  end
+new_cats.each do |cat|
+  logger.info 'Sending alert for %s' % cat['title']
+
+  message_body = <<~MESSAGE
+    New cat alert!
+
+    #{cat['title']} – #{URI.join('https://www.battersea.org.uk', cat['path'])}
+  MESSAGE
+
+  message = twillio.messages.create(
+    from: TWILLIO_FROM,
+    to: TWILLIO_TO,
+    body: message_body
+  )
+
+  logger.info '-> Message %s sent' % message.sid
 end
